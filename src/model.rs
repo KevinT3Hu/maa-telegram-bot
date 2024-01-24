@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct TaskStatus {
     pub user: String,
     pub device: String,
@@ -53,6 +53,22 @@ pub enum TaskType {
     LinkStartAutoRoguelike,
     #[serde(rename = "LinkStart-ReclamationAlgorithm")]
     LinkStartReclamationAlgorithm,
+}
+
+impl Display for TaskType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TaskType::CaptureImage => write!(f, "CaptureImage"),
+            TaskType::LinkStartBase => write!(f, "LinkStart-Base"),
+            TaskType::LinkStartWakeUp => write!(f, "LinkStart-WakeUp"),
+            TaskType::LinkStartCombat => write!(f, "LinkStart-Combat"),
+            TaskType::LinkStartRecruiting => write!(f, "LinkStart-Recruiting"),
+            TaskType::LinkStartMall => write!(f, "LinkStart-Mall"),
+            TaskType::LinkStartMission => write!(f, "LinkStart-Mission"),
+            TaskType::LinkStartAutoRoguelike => write!(f, "LinkStart-AutoRoguelike"),
+            TaskType::LinkStartReclamationAlgorithm => write!(f, "LinkStart-ReclamationAlgorithm"),
+        }
+    }
 }
 
 impl TaskType {

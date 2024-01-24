@@ -5,7 +5,7 @@ use teloxide::{
         Dispatcher, UpdateFilterExt, UpdateHandler,
     },
     payloads::{AnswerCallbackQuerySetters, SendMessageSetters},
-    requests::Requester,
+    requests::{Request, Requester},
     types::{
         CallbackQuery, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, Update,
     },
@@ -22,7 +22,7 @@ type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
 pub async fn setup_bot(bot: Bot) {
     bot.set_my_commands(vec![teloxide::types::BotCommand::new(
-        "append_task",
+        "appendtask",
         "Append task",
     )])
     .await
@@ -37,7 +37,7 @@ pub async fn setup_bot(bot: Bot) {
 }
 
 #[derive(BotCommands, Clone)]
-#[command(rename_rule = "camelCase")]
+#[command(rename_rule = "lowercase")]
 pub enum Command {
     AppendTask,
 }
@@ -94,7 +94,8 @@ async fn start_append_task_dialog(bot: Bot, dialog: BotDialog) -> HandlerResult 
     let devices = devices
         .iter()
         .map(|d| {
-            InlineKeyboardButton::new(d, InlineKeyboardButtonKind::CallbackData(d.to_string()))
+            let callback_text = format!("d:{}", d);
+            InlineKeyboardButton::new(d, InlineKeyboardButtonKind::CallbackData(callback_text))
         })
         .map(|d| vec![d]);
     let btn_markup = InlineKeyboardMarkup::new(devices);
@@ -108,6 +109,16 @@ async fn start_append_task_dialog(bot: Bot, dialog: BotDialog) -> HandlerResult 
 
 async fn receive_device(bot: Bot, dialog: BotDialog, q: CallbackQuery) -> HandlerResult {
     if let Some(ref device_id) = q.data {
+        if !device_id.starts_with("d:") {
+            bot.send_message(dialog.chat_id(), "Invalid device id")
+                .send()
+                .await?;
+            bot.answer_callback_query(q.id).show_alert(false).await?;
+            return Ok(());
+        }
+
+        let device_id = device_id.replace("d:", "");
+
         dialog
             .update(BotDialogState::AppendTaskToDevice {
                 device_id: device_id.clone(),
@@ -119,7 +130,8 @@ async fn receive_device(bot: Bot, dialog: BotDialog, q: CallbackQuery) -> Handle
         let users = users
             .iter()
             .map(|u| {
-                InlineKeyboardButton::new(u, InlineKeyboardButtonKind::CallbackData(u.to_string()))
+                let callback_text = format!("u:{}", u);
+                InlineKeyboardButton::new(u, InlineKeyboardButtonKind::CallbackData(callback_text))
             })
             .map(|u| vec![u]);
 
@@ -142,6 +154,16 @@ async fn receive_user(
     q: CallbackQuery,
 ) -> HandlerResult {
     if let Some(ref user_id) = q.data {
+        if !user_id.starts_with("u:") {
+            bot.send_message(dialog.chat_id(), "Invalid user id")
+                .send()
+                .await?;
+            bot.answer_callback_query(q.id).show_alert(false).await?;
+            return Ok(());
+        }
+
+        let user_id = user_id.replace("u:", "");
+
         dialog
             .update(BotDialogState::AppendTaskToUser {
                 device_id: device_id.clone(),
@@ -153,7 +175,8 @@ async fn receive_user(
         let tasks = tasks
             .iter()
             .map(|t| {
-                InlineKeyboardButton::new(t, InlineKeyboardButtonKind::CallbackData(t.to_string()))
+                let callback_text = format!("t:{}", t);
+                InlineKeyboardButton::new(t, InlineKeyboardButtonKind::CallbackData(callback_text))
             })
             .map(|t| vec![t]);
 
@@ -187,14 +210,23 @@ fn append_task(device_id: &str, user_id: &str, task: &str) {
 async fn receive_task(
     bot: Bot,
     dialog: BotDialog,
-    device_id: String,
-    user_id: String,
+    (device_id, user_id): (String, String),
     q: CallbackQuery,
 ) -> HandlerResult {
     if let Some(ref task) = q.data {
+        if !task.starts_with("t:") {
+            bot.send_message(dialog.chat_id(), "Invalid task")
+                .send()
+                .await?;
+            bot.answer_callback_query(q.id).show_alert(false).await?;
+            return Ok(());
+        }
+
+        let task = task.replace("t:", "");
+
         dialog.exit().await?;
 
-        append_task(&device_id, &user_id, task);
+        append_task(&device_id, &user_id, &task);
 
         bot.answer_callback_query(q.id).show_alert(true).await?;
 

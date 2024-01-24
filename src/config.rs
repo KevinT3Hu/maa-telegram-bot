@@ -1,20 +1,16 @@
-use clap::Parser;
 use serde::Deserialize;
 
-#[derive(Deserialize, clap::Parser, Clone, Debug)]
+#[derive(clap::Parser)]
+pub struct AppCommand {
+    pub config_file: String,
+}
+
+#[derive(Deserialize, Clone, Debug)]
 pub struct Config {
-    #[serde(skip)]
-    pub config_file: Option<String>,
-
-    pub port: Option<u16>,
-
-    #[arg(long)]
-    pub telegram_bot_token: Option<String>,
-
-    #[arg(long)]
-    pub telegram_user_id: Option<String>,
-
-    #[arg(skip)]
+    pub port: u16,
+    pub telegram_bot_token: String,
+    pub telegram_user_id: i64,
+    pub logging_dir: Option<String>, // will be created if not exists
     pub devices: Option<Vec<DeviceInfo>>,
 }
 
@@ -24,39 +20,10 @@ pub struct DeviceInfo {
     pub name: String,
 }
 
-macro_rules! get_attr {
-    ($parsed:expr,$file:expr,$param:ident) => {
-        $parsed.$param.unwrap_or_else(|| {
-            let msg = std::stringify!($param).to_owned() + " not specified";
-            $file.clone().expect(&msg).$param.expect(&msg)
-        })
-    };
-}
-
 impl Config {
-    pub fn parse_config() -> Self {
-        let parsed = Config::parse();
+    pub fn new(file: &str) -> Self {
+        let config_file = std::fs::read_to_string(file).expect("Unable to read config file");
 
-        let file_config = parsed.config_file.map(|path| {
-            let str = std::fs::read_to_string(path).expect("Config file is invalid.");
-            let parsed_file: Config = serde_json::from_str(&str).expect("Config file invalid");
-            parsed_file
-        });
-
-        let port = get_attr!(parsed, file_config, port);
-
-        let telegram_bot_token = get_attr!(parsed, file_config, telegram_bot_token);
-
-        let telegram_user_name = get_attr!(parsed, file_config, telegram_user_id);
-
-        let devices = file_config.and_then(|config| config.devices);
-
-        Self {
-            config_file: None,
-            port: Some(port),
-            telegram_bot_token: Some(telegram_bot_token),
-            telegram_user_id: Some(telegram_user_name),
-            devices,
-        }
+        serde_json::from_str(&config_file).expect("Unable to parse config file")
     }
 }
