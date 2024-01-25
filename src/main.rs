@@ -185,9 +185,18 @@ async fn get_task(
         if let Some(allowed_devices) = &app_state.allowed_devices {
             if !allowed_devices.contains_key(&req.device) {
                 return Ok(Json(GetTaskResponse { tasks: vec![] }));
+            } else {
+                let device_name = allowed_devices.get(&req.device).unwrap();
+                tracing::info!("New allowed device: {} ({})", req.device, device_name);
+                devices.insert(
+                    req.device.clone(),
+                    Device::new_with_name(req.device.clone(), device_name.clone()),
+                );
             }
+        } else {
+            tracing::info!("New device: {}", req.device);
+            devices.insert(req.device.clone(), Device::new(req.device.clone()));
         }
-        devices.insert(req.device.clone(), Device::new(req.device.clone()));
     }
 
     let device_length = devices.len();

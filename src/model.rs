@@ -2,6 +2,8 @@ use std::{collections::HashMap, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 
+use crate::config::DeviceInfo;
+
 #[derive(Deserialize, Debug)]
 pub struct TaskStatus {
     pub user: String,
@@ -23,6 +25,33 @@ impl Device {
         Self {
             id: id.clone(),
             name: id.clone(),
+            users: HashMap::new(),
+        }
+    }
+
+    pub fn new_with_name(id: String, name: String) -> Self {
+        Self {
+            id,
+            name,
+            users: HashMap::new(),
+        }
+    }
+}
+
+impl From<Device> for DeviceInfo {
+    fn from(device: Device) -> Self {
+        Self {
+            id: device.id,
+            name: device.name,
+        }
+    }
+}
+
+impl From<DeviceInfo> for Device {
+    fn from(device: DeviceInfo) -> Self {
+        Self {
+            id: device.id.clone(),
+            name: device.name.clone(),
             users: HashMap::new(),
         }
     }

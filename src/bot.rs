@@ -13,10 +13,10 @@ use teloxide::{
     utils::command::BotCommands,
     Bot,
 };
+use tracing::info;
 
 use crate::{
-    model::{Task, TaskType},
-    BOT_STATE,
+    config::DeviceInfo, model::{Task, TaskType, User}, BOT_STATE
 };
 
 type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
@@ -75,7 +75,7 @@ fn get_users(device_id: String) -> Vec<String> {
     users.unwrap()
 }
 
-fn get_devices() -> Vec<String> {
+fn get_devices(use_name:bool) -> Vec<String> {
     let app_state = BOT_STATE.get().unwrap().clone();
 
     let devices = app_state
@@ -83,7 +83,13 @@ fn get_devices() -> Vec<String> {
         .read()
         .unwrap()
         .values()
-        .map(|d| d.name.clone())
+        .map(|d|
+            if use_name {
+                d.name.clone()
+            } else {
+                d.id.clone()
+            }
+        )
         .collect();
 
     devices
@@ -97,27 +103,29 @@ fn get_is_single_user() -> bool {
         .load(std::sync::atomic::Ordering::Acquire)
 }
 
-fn get_single_device_and_user() -> Option<(String, String)> {
+fn get_single_device_and_user() -> Option<(DeviceInfo,User)> {
     let app_state = BOT_STATE.get().unwrap().clone();
+
+    info!("App state: {:?}", app_state);
 
     let devices = app_state.devices.read().unwrap();
 
     let device = devices.values().next().unwrap();
-    let device_name = device.name.clone();
 
-    let users = device.users.keys().next().unwrap().clone();
+    let user = device.users.values().next().unwrap().clone();
 
-    Some((device_name, users))
+    Some((device.clone().into(), user))
 }
 
 async fn start_append_task_dialog(bot: Bot, dialog: BotDialog) -> HandlerResult {
     // If only one user is present, no need to ask for device and user
     if get_is_single_user() {
-        if let Some((device_name, user_name)) = get_single_device_and_user() {
+        if let Some((device, user)) = get_single_device_and_user() {
+
             dialog
                 .update(BotDialogState::AppendTaskToUser {
-                    device_id: device_name.clone(),
-                    user_id: user_name.clone(),
+                    device_id: device.id.clone(),
+                    user_id: user.id.clone(),
                 })
                 .await?;
 
@@ -137,7 +145,7 @@ async fn start_append_task_dialog(bot: Bot, dialog: BotDialog) -> HandlerResult 
 
             bot.send_message(
                 dialog.chat_id(),
-                format!("Select task for device {}, user {}", device_name, user_name),
+                format!("Select task for device {}, user {}", device.name, user.id),
             )
             .reply_markup(btn_markup)
             .await?;
@@ -148,7 +156,7 @@ async fn start_append_task_dialog(bot: Bot, dialog: BotDialog) -> HandlerResult 
 
     dialog.update(BotDialogState::StartAppendTask).await?;
 
-    let devices = get_devices();
+    let devices = get_devices(true);
 
     let sent_msg = "Select device:".to_string();
 
@@ -314,7 +322,7 @@ fn get_permitted_user_id() -> i64 {
 async fn set_name_for_device(bot: Bot, dialog: BotDialog) -> HandlerResult {
     dialog.update(BotDialogState::StartSetNameForDevice).await?;
 
-    let devices = get_devices();
+    let devices = get_devices(false);
     let devices_markup = devices
         .iter()
         .map(|d| {
@@ -367,6 +375,7 @@ fn set_device_name(device_id: &str, name: &str) {
     let device = devices.get_mut(device_id).unwrap();
 
     device.name = name.to_owned();
+    info!("Device {} name set to {}", device_id, name);
 }
 
 async fn receive_device_name(
@@ -376,6 +385,8 @@ async fn receive_device_name(
     msg: String,
 ) -> HandlerResult {
     set_device_name(&device_id, &msg);
+
+    info!("msg: {}",msg);
 
     bot.send_message(dialog.chat_id(), "Device name set")
         .await?;
