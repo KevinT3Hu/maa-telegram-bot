@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     net::SocketAddr,
     ops::Deref,
-    sync::{Arc, RwLock},
+    sync::{atomic::AtomicBool, Arc, RwLock},
 };
 
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
@@ -19,7 +19,6 @@ use teloxide::{
 };
 use tokio::net::TcpListener;
 
-
 use crate::{config::Config, model::User};
 
 mod bot;
@@ -28,11 +27,12 @@ mod model;
 
 static BOT_STATE: OnceCell<Arc<AppState>> = OnceCell::new();
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct AppState {
     pub devices: Arc<RwLock<HashMap<String, Device>>>,
     pub tg_user_id: i64,
     pub bot: Bot,
+    pub is_single_user: AtomicBool,
     pub allowed_devices: Option<HashMap<String, String>>,
 }
 
@@ -49,6 +49,7 @@ impl AppState {
             devices: Arc::new(RwLock::new(HashMap::new())),
             tg_user_id,
             bot,
+            is_single_user: AtomicBool::new(false),
             allowed_devices,
         }
     }
@@ -158,7 +159,7 @@ async fn report_status(
                 .send()
                 .await
                 .unwrap();
-        },
+        }
         TaskType::LinkStartCombat
         | TaskType::LinkStartBase
         | TaskType::LinkStartWakeUp
@@ -187,13 +188,24 @@ async fn get_task(
         devices.insert(req.device.clone(), Device::new(req.device.clone()));
     }
 
+    let device_length = devices.len();
     let device = devices.get_mut(&req.device).unwrap();
-    let user = device.users.entry(req.user.clone()).or_insert(User {
+    let users = &mut device.users;
+    let user = users.entry(req.user.clone()).or_insert(User {
         id: req.user.clone(),
         tasks: vec![],
     });
+    let tasks = user.tasks.clone();
 
-    Ok(Json(GetTaskResponse {
-        tasks: user.tasks.clone(),
-    }))
+    if device_length == 1 && users.len() == 1 {
+        app_state
+            .is_single_user
+            .store(true, std::sync::atomic::Ordering::Release);
+    } else {
+        app_state
+            .is_single_user
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+
+    Ok(Json(GetTaskResponse { tasks }))
 }

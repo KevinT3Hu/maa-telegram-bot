@@ -11,7 +11,8 @@ This project is still WIP. It is now equipped with basic features of task contro
 - [x] Basic task control
 - [ ] Error handling
 - [ ] Task status query
-- [ ] Better task status report
+- [x] Better task status report
+- [ ] Better logging
 
 ## Usage
 

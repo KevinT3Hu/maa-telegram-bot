@@ -84,7 +84,60 @@ fn get_devices() -> Vec<String> {
     devices
 }
 
+fn get_is_single_user() -> bool {
+    let app_state = BOT_STATE.get().unwrap().clone();
+
+    app_state
+        .is_single_user
+        .load(std::sync::atomic::Ordering::Acquire)
+}
+
+fn get_single_device_and_user() -> Option<(String, String)> {
+    let app_state = BOT_STATE.get().unwrap().clone();
+
+    let devices = app_state.devices.read().unwrap();
+
+    let device = devices.keys().next().unwrap();
+
+    let users = devices.get(device).unwrap().users.keys().next().unwrap();
+
+    Some((device.clone(), users.clone()))
+}
+
 async fn start_append_task_dialog(bot: Bot, dialog: BotDialog) -> HandlerResult {
+    // If only one user is present, no need to ask for device and user
+    if get_is_single_user() {
+        if let Some((device_id, user_id)) = get_single_device_and_user() {
+            dialog
+                .update(BotDialogState::AppendTaskToUser {
+                    device_id: device_id.clone(),
+                    user_id: user_id.clone(),
+                })
+                .await?;
+
+            let tasks = TaskType::get_all();
+            let tasks = tasks
+                .iter()
+                .map(|t| {
+                    let callback_text = format!("t:{}", t);
+                    InlineKeyboardButton::new(
+                        t,
+                        InlineKeyboardButtonKind::CallbackData(callback_text),
+                    )
+                })
+                .map(|t| vec![t]);
+
+            let btn_markup = InlineKeyboardMarkup::new(tasks);
+
+            bot.send_message(
+                dialog.chat_id(),
+                format!("Select task for device {}, user {}", device_id, user_id),
+            )
+            .reply_markup(btn_markup)
+            .await?;
+        }
+    }
+
     dialog.update(BotDialogState::Start).await?;
 
     let devices = get_devices();
