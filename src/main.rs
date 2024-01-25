@@ -30,6 +30,7 @@ static BOT_STATE: OnceCell<Arc<AppState>> = OnceCell::new();
 #[derive(Debug)]
 struct AppState {
     pub devices: Arc<RwLock<HashMap<String, Device>>>,
+    pub all_tasks: Arc<RwLock<HashMap<String, TaskType>>>,
     pub tg_user_id: i64,
     pub bot: Bot,
     pub is_single_user: AtomicBool,
@@ -47,6 +48,7 @@ impl AppState {
 
         Self {
             devices: Arc::new(RwLock::new(HashMap::new())),
+            all_tasks: Arc::new(RwLock::new(HashMap::new())),
             tg_user_id,
             bot,
             is_single_user: AtomicBool::new(false),
@@ -108,20 +110,12 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-fn get_task_type(
-    app_state: Arc<AppState>,
-    task_id: &str,
-    device_id: &str,
-    user_id: &str,
-) -> TaskType {
-    let devices = app_state.devices.read().unwrap();
+fn get_task_type(app_state: Arc<AppState>, task_id: &str) -> TaskType {
+    let all_tasks = app_state.all_tasks.read().unwrap();
 
-    let device = devices.get(device_id).unwrap();
-    let user_tasks = device.users.get(user_id).unwrap().tasks.clone();
+    let task_type = all_tasks.get(task_id).unwrap();
 
-    let task = user_tasks.iter().find(|t| t.id == task_id).unwrap();
-
-    task.task_type.clone()
+    task_type.clone()
 }
 
 // Method: POST
@@ -133,7 +127,7 @@ async fn report_status(
 ) -> Result<StatusCode, ()> {
     tracing::info!("Report status");
 
-    let task_type = get_task_type(app_state.deref().clone(), &req.task, &req.device, &req.user);
+    let task_type = get_task_type(app_state.deref().clone(), &req.task);
 
     let msg = format!("Task {} finished. Status: {}", task_type, req.status);
 
@@ -146,7 +140,7 @@ async fn report_status(
 
     // handle and send payload
     match task_type {
-        TaskType::CaptureImage => {
+        TaskType::CaptureImage | TaskType::CaptureImageNow => {
             let payload = req.payload;
             // convert base64 image to bytes
             let payload = BASE64_STANDARD.decode(payload.as_bytes()).unwrap();
@@ -159,6 +153,31 @@ async fn report_status(
                 .send()
                 .await
                 .unwrap();
+        }
+        TaskType::HeartBeat => {
+            let payload = req.payload;
+
+            if payload.is_empty() {
+                app_state
+                    .bot
+                    .send_message(ChatId(app_state.tg_user_id), "No task is running.")
+                    .await
+                    .unwrap();
+                return Ok(StatusCode::OK);
+            }
+
+            let task_type = get_task_type(app_state.deref().clone(), &payload);
+
+            let msg = format!("Task {} is running.\nTask id: {}", task_type, payload);
+
+            app_state
+                .bot
+                .send_message(ChatId(app_state.tg_user_id), msg)
+                .send()
+                .await
+                .unwrap();
+
+            return Ok(StatusCode::OK);
         }
         TaskType::LinkStartCombat
         | TaskType::LinkStartBase

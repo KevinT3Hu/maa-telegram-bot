@@ -66,6 +66,7 @@ pub struct User {
 #[derive(Serialize, Clone, Debug)]
 pub enum TaskType {
     CaptureImage,
+    CaptureImageNow,
     #[serde(rename = "LinkStart-Base")]
     LinkStartBase,
     #[serde(rename = "LinkStart-WakeUp")]
@@ -82,12 +83,14 @@ pub enum TaskType {
     LinkStartAutoRoguelike,
     #[serde(rename = "LinkStart-ReclamationAlgorithm")]
     LinkStartReclamationAlgorithm,
+    HeartBeat,
 }
 
 impl Display for TaskType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TaskType::CaptureImage => write!(f, "CaptureImage"),
+            TaskType::CaptureImageNow => write!(f, "CaptureImageNow"),
             TaskType::LinkStartBase => write!(f, "LinkStart-Base"),
             TaskType::LinkStartWakeUp => write!(f, "LinkStart-WakeUp"),
             TaskType::LinkStartCombat => write!(f, "LinkStart-Combat"),
@@ -96,6 +99,7 @@ impl Display for TaskType {
             TaskType::LinkStartMission => write!(f, "LinkStart-Mission"),
             TaskType::LinkStartAutoRoguelike => write!(f, "LinkStart-AutoRoguelike"),
             TaskType::LinkStartReclamationAlgorithm => write!(f, "LinkStart-ReclamationAlgorithm"),
+            TaskType::HeartBeat => write!(f, "HeartBeat"),
         }
     }
 }
@@ -104,6 +108,7 @@ impl TaskType {
     pub fn get_all() -> Vec<String> {
         vec![
             "CaptureImage".to_owned(),
+            "CaptureImageNow".to_owned(),
             "LinkStart-Base".to_owned(),
             "LinkStart-WakeUp".to_owned(),
             "LinkStart-Combat".to_owned(),
@@ -120,6 +125,7 @@ impl From<&str> for TaskType {
     fn from(s: &str) -> Self {
         match s {
             "CaptureImage" => Self::CaptureImage,
+            "CaptureImageNow" => Self::CaptureImageNow,
             "LinkStart-Base" => Self::LinkStartBase,
             "LinkStart-WakeUp" => Self::LinkStartWakeUp,
             "LinkStart-Combat" => Self::LinkStartCombat,
@@ -128,6 +134,7 @@ impl From<&str> for TaskType {
             "LinkStart-Mission" => Self::LinkStartMission,
             "LinkStart-AutoRoguelike" => Self::LinkStartAutoRoguelike,
             "LinkStart-ReclamationAlgorithm" => Self::LinkStartReclamationAlgorithm,
+            "HeartBeat" => Self::HeartBeat,
             _ => panic!("Invalid task type"),
         }
     }
@@ -152,7 +159,7 @@ impl Task {
         Self::new(task_type.into())
     }
 
-    pub fn new_capture_image_task() -> Self {
+    pub fn capture_image_task() -> Self {
         Self::new(TaskType::CaptureImage)
     }
 }
