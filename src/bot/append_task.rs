@@ -9,32 +9,31 @@ use crate::model::TaskType;
 
 use super::{
     append_task, get_devices_markup, get_is_single_user, get_single_device_and_user,
-    get_tasks_markup, get_users_markup, BotDialog, BotDialogState, HandlerResult,
+    get_tasks_markup, get_users_markup, BotDialog, DialogState, HandlerResult,
 };
 
 pub async fn start_append_task_dialog(bot: Bot, dialog: BotDialog) -> HandlerResult {
     // If only one user is present, no need to ask for device and user
     if get_is_single_user() {
-        if let Some((device, user)) = get_single_device_and_user() {
-            dialog
-                .update(BotDialogState::AppendTaskToUser {
-                    device_id: device.id.clone(),
-                    user_id: user.id.clone(),
-                })
-                .await?;
-
-            bot.send_message(
-                dialog.chat_id(),
-                format!("Select task for device {}, user {}", device.name, user.id),
-            )
-            .reply_markup(get_tasks_markup())
+        let (device, user) = get_single_device_and_user();
+        dialog
+            .update(DialogState::AppendTaskToUser {
+                device_id: device.id.clone(),
+                user_id: user.id.clone(),
+            })
             .await?;
 
-            return Ok(());
-        }
+        bot.send_message(
+            dialog.chat_id(),
+            format!("Select task for device {}, user {}", device.name, user.id),
+        )
+        .reply_markup(get_tasks_markup())
+        .await?;
+
+        return Ok(());
     }
 
-    dialog.update(BotDialogState::StartAppendTask).await?;
+    dialog.update(DialogState::StartAppendTask).await?;
 
     let sent_msg = "Select device:".to_string();
 
@@ -60,11 +59,11 @@ pub async fn receive_device(bot: Bot, dialog: BotDialog, q: CallbackQuery) -> Ha
         let current_state = dialog.get().await?.unwrap();
 
         let next_state = match current_state {
-            BotDialogState::StartAppendTask => BotDialogState::AppendTaskToDevice {
+            DialogState::StartAppendTask => DialogState::AppendTaskToDevice {
                 device_id: device_id.clone(),
             },
-            BotDialogState::StartAppendHeartBeatTask => {
-                BotDialogState::AppendHeartBeatTaskToDevice {
+            DialogState::StartAppendHeartBeatTask => {
+                DialogState::AppendHeartBeatTaskToDevice {
                     device_id: device_id.clone(),
                 }
             }
@@ -108,7 +107,7 @@ pub async fn receive_user(
 
         let current_state = dialog.get().await?.unwrap();
 
-        if let BotDialogState::AppendHeartBeatTaskToDevice { device_id } = current_state {
+        if let DialogState::AppendHeartBeatTaskToDevice { device_id } = current_state {
             dialog.exit().await?;
 
             append_task(&device_id, &user_id, &TaskType::HeartBeat.to_string());
@@ -118,7 +117,7 @@ pub async fn receive_user(
         }
 
         dialog
-            .update(BotDialogState::AppendTaskToUser {
+            .update(DialogState::AppendTaskToUser {
                 device_id: device_id.clone(),
                 user_id: user_id.clone(),
             })

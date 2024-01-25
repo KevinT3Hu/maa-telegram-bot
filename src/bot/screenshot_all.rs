@@ -19,6 +19,7 @@ fn append_screenshot_to_all() {
     }
 }
 
+#[allow(clippy::module_name_repetitions)]
 pub async fn take_screenshot_all(bot: Bot, dialog: BotDialog) -> HandlerResult {
     append_screenshot_to_all();
 

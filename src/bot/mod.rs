@@ -25,7 +25,7 @@ mod screenshot_all;
 
 type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
-pub async fn setup_bot(bot: Bot) {
+pub async fn setup(bot: Bot) {
     bot.set_my_commands(vec![
         BotCommand::new("appendtask", "Append task"),
         BotCommand::new("screenshotall", "Take screenshot for all bound devices"),
@@ -35,11 +35,11 @@ pub async fn setup_bot(bot: Bot) {
     .unwrap();
 
     Dispatcher::builder(bot.clone(), schema())
-        .dependencies(dptree::deps![InMemStorage::<BotDialogState>::new()])
+        .dependencies(dptree::deps![InMemStorage::<DialogState>::new()])
         .enable_ctrlc_handler()
         .build()
         .dispatch()
-        .await
+        .await;
 }
 
 #[derive(BotCommands, Clone)]
@@ -51,7 +51,7 @@ pub enum Command {
 }
 
 #[derive(Clone)]
-pub enum BotDialogState {
+pub enum DialogState {
     Idle,
     StartAppendTask,
     AppendTaskToDevice { device_id: String },
@@ -60,13 +60,13 @@ pub enum BotDialogState {
     AppendHeartBeatTaskToDevice { device_id: String },
 }
 
-impl Default for BotDialogState {
+impl Default for DialogState {
     fn default() -> Self {
         Self::Idle
     }
 }
 
-type BotDialog = Dialogue<BotDialogState, InMemStorage<BotDialogState>>;
+type BotDialog = Dialogue<DialogState, InMemStorage<DialogState>>;
 
 fn get_users(device_id: &str) -> Vec<String> {
     let app_state = BOT_STATE.get().unwrap().clone();
@@ -109,7 +109,7 @@ fn get_is_single_user() -> bool {
         .load(std::sync::atomic::Ordering::Acquire)
 }
 
-fn get_single_device_and_user() -> Option<(DeviceInfo, User)> {
+fn get_single_device_and_user() -> (DeviceInfo, User) {
     let app_state = BOT_STATE.get().unwrap().clone();
 
     info!("App state: {:?}", app_state);
@@ -120,7 +120,7 @@ fn get_single_device_and_user() -> Option<(DeviceInfo, User)> {
 
     let user = device.users.values().next().unwrap().clone();
 
-    Some((device.clone().into(), user))
+    (device.clone().into(), user)
 }
 
 // TODO: should this be a method of AppState?
@@ -164,7 +164,7 @@ fn get_tasks_markup() -> InlineKeyboardMarkup {
     let tasks = tasks
         .iter()
         .map(|t| {
-            let callback_text = format!("t:{}", t);
+            let callback_text = format!("t:{t}");
             InlineKeyboardButton::new(t, InlineKeyboardButtonKind::CallbackData(callback_text))
         })
         .map(|t| vec![t]);
@@ -178,7 +178,7 @@ fn get_devices_markup() -> InlineKeyboardMarkup {
     let devices = devices
         .iter()
         .map(|d| {
-            let callback_text = format!("d:{}", d);
+            let callback_text = format!("d:{d}");
             InlineKeyboardButton::new(d, InlineKeyboardButtonKind::CallbackData(callback_text))
         })
         .map(|d| vec![d]);
@@ -192,7 +192,7 @@ fn get_users_markup(device_id: &str) -> InlineKeyboardMarkup {
     let users = users
         .iter()
         .map(|u| {
-            let callback_text = format!("u:{}", u);
+            let callback_text = format!("u:{u}");
             InlineKeyboardButton::new(u, InlineKeyboardButtonKind::CallbackData(callback_text))
         })
         .map(|u| vec![u]);
@@ -212,24 +212,24 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
     let msg_handler = Update::filter_message().branch(command_handler);
 
     let callback_handler = Update::filter_callback_query()
-        .branch(case![BotDialogState::StartAppendTask].endpoint(append_task::receive_device))
+        .branch(case![DialogState::StartAppendTask].endpoint(append_task::receive_device))
         .branch(
-            case![BotDialogState::StartAppendHeartBeatTask].endpoint(append_task::receive_device),
+            case![DialogState::StartAppendHeartBeatTask].endpoint(append_task::receive_device),
         )
         .branch(
-            case![BotDialogState::AppendTaskToDevice { device_id }]
+            case![DialogState::AppendTaskToDevice { device_id }]
                 .endpoint(append_task::receive_user),
         )
         .branch(
-            case![BotDialogState::AppendHeartBeatTaskToDevice { device_id }]
+            case![DialogState::AppendHeartBeatTaskToDevice { device_id }]
                 .endpoint(append_task::receive_user),
         )
         .branch(
-            case![BotDialogState::AppendTaskToUser { device_id, user_id }]
+            case![DialogState::AppendTaskToUser { device_id, user_id }]
                 .endpoint(append_task::receive_task),
         );
 
-    dialogue::enter::<Update, InMemStorage<BotDialogState>, BotDialogState, _>()
+    dialogue::enter::<Update, InMemStorage<DialogState>, DialogState, _>()
         .chain(dptree::filter(|dialog: BotDialog| {
             let permitted_user_id = get_permitted_user_id();
 

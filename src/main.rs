@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    ops::Deref,
     sync::{atomic::AtomicBool, Arc, RwLock},
 };
 
@@ -102,7 +101,7 @@ async fn main() {
         .expect("Error creating Tcp listener");
 
     tokio::spawn(async move {
-        bot::setup_bot(bot_clone).await;
+        bot::setup(bot_clone).await;
     });
 
     println!("Staring server...");
@@ -110,10 +109,7 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-fn get_task_type(
-    app_state: Arc<AppState>,
-    task_id: &str,
-) -> TaskType {
+fn get_task_type(app_state: &Arc<AppState>, task_id: &str) -> TaskType {
     let all_tasks = app_state.all_tasks.read().unwrap();
 
     let task_type = all_tasks.get(task_id).unwrap();
@@ -130,7 +126,7 @@ async fn report_status(
 ) -> Result<StatusCode, ()> {
     tracing::info!("Report status");
 
-    let task_type = get_task_type(app_state.deref().clone(), &req.task);
+    let task_type = get_task_type(&app_state, &req.task);
 
     let msg = format!("Task {} finished. Status: {}", task_type, req.status);
 
@@ -161,13 +157,17 @@ async fn report_status(
             let payload = req.payload;
 
             if payload.is_empty() {
-                app_state.bot.send_message(ChatId(app_state.tg_user_id), "No task is running.").await.unwrap();
+                app_state
+                    .bot
+                    .send_message(ChatId(app_state.tg_user_id), "No task is running.")
+                    .await
+                    .unwrap();
                 return Ok(StatusCode::OK);
             }
 
-            let task_type = get_task_type(app_state.deref().clone(), &payload);
+            let task_type = get_task_type(&app_state, &payload);
 
-            let msg = format!("Task {} is running.\nTask id: {}", task_type, payload);
+            let msg = format!("Task {task_type} is running.\nTask id: {payload}");
 
             app_state
                 .bot
@@ -201,19 +201,19 @@ async fn get_task(
 
     if !devices.contains_key(&req.device) {
         if let Some(allowed_devices) = &app_state.allowed_devices {
-            if !allowed_devices.contains_key(&req.device) {
-                return Ok(Json(GetTaskResponse { tasks: vec![] }));
-            } else {
+            if allowed_devices.contains_key(&req.device) {
                 let device_name = allowed_devices.get(&req.device).unwrap();
                 tracing::info!("New allowed device: {} ({})", req.device, device_name);
                 devices.insert(
                     req.device.clone(),
                     Device::new_with_name(req.device.clone(), device_name.clone()),
                 );
+            } else {
+                return Ok(Json(GetTaskResponse { tasks: vec![] }));
             }
         } else {
             tracing::info!("New device: {}", req.device);
-            devices.insert(req.device.clone(), Device::new(req.device.clone()));
+            devices.insert(req.device.clone(), Device::new(&req.device));
         }
     }
 

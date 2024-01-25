@@ -21,10 +21,10 @@ pub struct Device {
 }
 
 impl Device {
-    pub fn new(id: String) -> Self {
+    pub fn new(id: &str) -> Self {
         Self {
-            id: id.clone(),
-            name: id.clone(),
+            id: id.to_string(),
+            name: id.to_string(),
             users: HashMap::new(),
         }
     }

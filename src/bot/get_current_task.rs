@@ -4,23 +4,22 @@ use crate::model::TaskType;
 
 use super::{
     append_task, get_devices_markup, get_is_single_user, get_single_device_and_user, BotDialog,
-    BotDialogState, HandlerResult,
+    DialogState, HandlerResult,
 };
 
 pub async fn start_get_current_task_dialog(bot: Bot, dialog: BotDialog) -> HandlerResult {
     // If only one user is present, no need to ask for device and user
     if get_is_single_user() {
-        if let Some((device, user)) = get_single_device_and_user() {
-            dialog.exit().await?;
+        let (device, user) = get_single_device_and_user();
+        dialog.exit().await?;
 
-            append_task(&device.id, &user.id, &TaskType::HeartBeat.to_string());
+        append_task(&device.id, &user.id, &TaskType::HeartBeat.to_string());
 
-            return Ok(());
-        }
+        return Ok(());
     }
 
     dialog
-        .update(BotDialogState::StartAppendHeartBeatTask)
+        .update(DialogState::StartAppendHeartBeatTask)
         .await?;
 
     let sent_msg = "Select device:".to_string();
