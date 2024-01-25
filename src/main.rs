@@ -173,6 +173,8 @@ async fn report_status(
     Ok(StatusCode::OK)
 }
 
+// Method: POST
+// Content-Type: application/json
 async fn get_task(
     app_state: State<Arc<AppState>>,
     Json(req): Json<GetTaskReq>,

@@ -122,6 +122,10 @@ impl Task {
     pub fn from_str(task_type: &str) -> Self {
         Self::new(task_type.into())
     }
+
+    pub fn new_capture_image_task() -> Self {
+        Self::new(TaskType::CaptureImage)
+    }
 }
 
 #[derive(Serialize, Clone, Debug)]

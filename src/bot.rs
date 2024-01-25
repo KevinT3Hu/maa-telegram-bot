@@ -7,7 +7,8 @@ use teloxide::{
     payloads::{AnswerCallbackQuerySetters, SendMessageSetters},
     requests::{Request, Requester},
     types::{
-        CallbackQuery, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, Update,
+        BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardButtonKind,
+        InlineKeyboardMarkup, Update,
     },
     utils::command::BotCommands,
     Bot,
@@ -21,10 +22,10 @@ use crate::{
 type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
 pub async fn setup_bot(bot: Bot) {
-    bot.set_my_commands(vec![teloxide::types::BotCommand::new(
-        "appendtask",
-        "Append task",
-    )])
+    bot.set_my_commands(vec![
+        BotCommand::new("appendtask", "Append task"),
+        BotCommand::new("setdevicename", "Set device display name"),
+    ])
     .await
     .unwrap();
 
@@ -40,18 +41,22 @@ pub async fn setup_bot(bot: Bot) {
 #[command(rename_rule = "lowercase")]
 pub enum Command {
     AppendTask,
+    SetDeviceName,
 }
 
 #[derive(Clone)]
 pub enum BotDialogState {
-    Start,
+    Idle,
+    StartSetNameForDevice,
+    SetNameDevice { device_id: String },
+    StartAppendTask,
     AppendTaskToDevice { device_id: String },
     AppendTaskToUser { device_id: String, user_id: String },
 }
 
 impl Default for BotDialogState {
     fn default() -> Self {
-        Self::Start
+        Self::Idle
     }
 }
 
@@ -97,21 +102,22 @@ fn get_single_device_and_user() -> Option<(String, String)> {
 
     let devices = app_state.devices.read().unwrap();
 
-    let device = devices.keys().next().unwrap();
+    let device = devices.values().next().unwrap();
+    let device_name = device.name.clone();
 
-    let users = devices.get(device).unwrap().users.keys().next().unwrap();
+    let users = device.users.keys().next().unwrap().clone();
 
-    Some((device.clone(), users.clone()))
+    Some((device_name, users))
 }
 
 async fn start_append_task_dialog(bot: Bot, dialog: BotDialog) -> HandlerResult {
     // If only one user is present, no need to ask for device and user
     if get_is_single_user() {
-        if let Some((device_id, user_id)) = get_single_device_and_user() {
+        if let Some((device_name, user_name)) = get_single_device_and_user() {
             dialog
                 .update(BotDialogState::AppendTaskToUser {
-                    device_id: device_id.clone(),
-                    user_id: user_id.clone(),
+                    device_id: device_name.clone(),
+                    user_id: user_name.clone(),
                 })
                 .await?;
 
@@ -131,14 +137,16 @@ async fn start_append_task_dialog(bot: Bot, dialog: BotDialog) -> HandlerResult 
 
             bot.send_message(
                 dialog.chat_id(),
-                format!("Select task for device {}, user {}", device_id, user_id),
+                format!("Select task for device {}, user {}", device_name, user_name),
             )
             .reply_markup(btn_markup)
             .await?;
+
+            return Ok(());
         }
     }
 
-    dialog.update(BotDialogState::Start).await?;
+    dialog.update(BotDialogState::StartAppendTask).await?;
 
     let devices = get_devices();
 
@@ -257,7 +265,15 @@ fn append_task(device_id: &str, user_id: &str, task: &str) {
         .get_mut(user_id)
         .unwrap();
 
-    user.tasks.push(Task::from_str(task));
+    let task = Task::from_str(task);
+    let task_type = task.task_type.clone();
+    user.tasks.push(task);
+
+    // append an extra CaptureImage task if the task itself is not
+    if !matches!(task_type, TaskType::CaptureImage) {
+        let task = Task::new_capture_image_task();
+        user.tasks.push(task);
+    }
 }
 
 async fn receive_task(
@@ -295,18 +311,94 @@ fn get_permitted_user_id() -> i64 {
     app_state.tg_user_id
 }
 
+async fn set_name_for_device(bot: Bot, dialog: BotDialog) -> HandlerResult {
+    dialog.update(BotDialogState::StartSetNameForDevice).await?;
+
+    let devices = get_devices();
+    let devices_markup = devices
+        .iter()
+        .map(|d| {
+            let callback_text = format!("d:{}", d);
+            InlineKeyboardButton::new(d, InlineKeyboardButtonKind::CallbackData(callback_text))
+        })
+        .map(|d| vec![d]);
+
+    bot.send_message(dialog.chat_id(), "Set name for device\nNote that this setting only affects this instance. If you want to have a name persistent to all instances, you need to set that in the bot config file.")
+        .reply_markup(InlineKeyboardMarkup::new(devices_markup))
+        .await?;
+
+    Ok(())
+}
+
+async fn set_name_receive_device(bot: Bot, dialog: BotDialog, q: CallbackQuery) -> HandlerResult {
+    if let Some(ref device_id) = q.data {
+        if !device_id.starts_with("d:") {
+            bot.send_message(dialog.chat_id(), "Invalid device id")
+                .send()
+                .await?;
+            bot.answer_callback_query(q.id).show_alert(false).await?;
+            return Ok(());
+        }
+
+        let device_id = device_id.replace("d:", "");
+
+        dialog
+            .update(BotDialogState::SetNameDevice {
+                device_id: device_id.clone(),
+            })
+            .await?;
+
+        bot.answer_callback_query(q.id).show_alert(false).await?;
+
+        bot.send_message(dialog.chat_id(), "Set name for the selected device")
+            .await?;
+
+        return Ok(());
+    }
+
+    Ok(())
+}
+
+fn set_device_name(device_id: &str, name: &str) {
+    let app_state = BOT_STATE.get().unwrap().clone();
+
+    let mut devices = app_state.devices.write().unwrap();
+
+    let device = devices.get_mut(device_id).unwrap();
+
+    device.name = name.to_owned();
+}
+
+async fn receive_device_name(
+    bot: Bot,
+    dialog: BotDialog,
+    device_id: String,
+    msg: String,
+) -> HandlerResult {
+    set_device_name(&device_id, &msg);
+
+    bot.send_message(dialog.chat_id(), "Device name set")
+        .await?;
+
+    Ok(())
+}
+
 fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>> {
     let command_handler = teloxide::filter_command::<Command, _>()
-        .branch(case![Command::AppendTask].endpoint(start_append_task_dialog));
+        .branch(case![Command::AppendTask].endpoint(start_append_task_dialog))
+        .branch(case![Command::SetDeviceName].endpoint(set_name_for_device));
 
-    let msg_handler = Update::filter_message().branch(command_handler);
+    let msg_handler = Update::filter_message()
+        .branch(command_handler)
+        .branch(case![BotDialogState::SetNameDevice { device_id }].endpoint(receive_device_name));
 
     let callback_handler = Update::filter_callback_query()
-        .branch(case![BotDialogState::Start].endpoint(receive_device))
+        .branch(case![BotDialogState::StartAppendTask].endpoint(receive_device))
         .branch(case![BotDialogState::AppendTaskToDevice { device_id }].endpoint(receive_user))
         .branch(
             case![BotDialogState::AppendTaskToUser { device_id, user_id }].endpoint(receive_task),
-        );
+        )
+        .branch(case![BotDialogState::StartSetNameForDevice].endpoint(set_name_receive_device));
 
     dialogue::enter::<Update, InMemStorage<BotDialogState>, BotDialogState, _>()
         .chain(dptree::filter(|dialog: BotDialog| {
