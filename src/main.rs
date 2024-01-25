@@ -110,7 +110,10 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-fn get_task_type(app_state: Arc<AppState>, task_id: &str) -> TaskType {
+fn get_task_type(
+    app_state: Arc<AppState>,
+    task_id: &str,
+) -> TaskType {
     let all_tasks = app_state.all_tasks.read().unwrap();
 
     let task_type = all_tasks.get(task_id).unwrap();
@@ -158,11 +161,7 @@ async fn report_status(
             let payload = req.payload;
 
             if payload.is_empty() {
-                app_state
-                    .bot
-                    .send_message(ChatId(app_state.tg_user_id), "No task is running.")
-                    .await
-                    .unwrap();
+                app_state.bot.send_message(ChatId(app_state.tg_user_id), "No task is running.").await.unwrap();
                 return Ok(StatusCode::OK);
             }
 
