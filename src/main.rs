@@ -19,6 +19,7 @@ use teloxide::{
 };
 use tokio::net::TcpListener;
 
+
 use crate::{config::Config, model::User};
 
 mod bot;
@@ -157,8 +158,15 @@ async fn report_status(
                 .send()
                 .await
                 .unwrap();
-        }
-        _ => {}
+        },
+        TaskType::LinkStartCombat
+        | TaskType::LinkStartBase
+        | TaskType::LinkStartWakeUp
+        | TaskType::LinkStartMall
+        | TaskType::LinkStartMission
+        | TaskType::LinkStartAutoRoguelike
+        | TaskType::LinkStartReclamationAlgorithm
+        | TaskType::LinkStartRecruiting => {}
     }
 
     Ok(StatusCode::OK)
