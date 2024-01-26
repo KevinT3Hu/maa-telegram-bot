@@ -9,11 +9,11 @@ use super::{
 
 pub async fn start_get_current_task_dialog(bot: Bot, dialog: BotDialog) -> HandlerResult {
     // If only one user is present, no need to ask for device and user
-    if get_is_single_user() {
-        let (device, user) = get_single_device_and_user();
+    if get_is_single_user()? {
+        let (device, user) = get_single_device_and_user()?;
         dialog.exit().await?;
 
-        append_task(&device.id, &user.id, &TaskType::HeartBeat.to_string());
+        append_task(&device.id, &user.id, &TaskType::HeartBeat.to_string())?;
 
         return Ok(());
     }
@@ -22,10 +22,10 @@ pub async fn start_get_current_task_dialog(bot: Bot, dialog: BotDialog) -> Handl
         .update(DialogState::StartAppendHeartBeatTask)
         .await?;
 
-    let sent_msg = "Select device:".to_string();
+    let sent_msg = "Select device:".to_owned();
 
     bot.send_message(dialog.chat_id(), sent_msg)
-        .reply_markup(get_devices_markup())
+        .reply_markup(get_devices_markup()?)
         .await?;
 
     Ok(())

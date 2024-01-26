@@ -1,7 +1,5 @@
 use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    sync::{atomic::AtomicBool, Arc, RwLock},
+    collections::HashMap, fs::create_dir_all, net::SocketAddr, process::exit, sync::{atomic::{AtomicBool, Ordering}, Arc, RwLock}
 };
 
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
@@ -9,6 +7,7 @@ use axum_macros::debug_handler;
 use base64::{prelude::BASE64_STANDARD, Engine};
 use clap::Parser;
 use config::{AppCommand, DeviceInfo};
+use error::AppError;
 use model::{Device, GetTaskReq, GetTaskResponse, TaskStatus, TaskType};
 use once_cell::sync::OnceCell;
 use teloxide::{
@@ -17,12 +16,14 @@ use teloxide::{
     Bot,
 };
 use tokio::net::TcpListener;
+use tracing_appender::rolling::daily;
 
 use crate::{config::Config, model::User};
 
 mod bot;
 mod config;
 mod model;
+mod error;
 
 static BOT_STATE: OnceCell<Arc<AppState>> = OnceCell::new();
 
@@ -61,9 +62,11 @@ async fn main() {
     let config = AppCommand::parse();
     let config = Config::new(&config.config_file);
 
-    if let Some(logging_dir) = &config.logging_dir {
-        std::fs::create_dir_all(logging_dir).expect("Unable to create logging dir");
-        let file_appender = tracing_appender::rolling::daily(logging_dir, "maa-tgbot.log");
+    if let Some(ref logging_dir) = config.logging_dir {
+        if let Err(e) = create_dir_all(logging_dir){
+            tracing::error!("Error creating logging dir: {}", e);
+        };
+        let file_appender = daily(logging_dir, "maa-tgbot.log");
         let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
         tracing_subscriber::fmt()
             .pretty()
@@ -90,31 +93,41 @@ async fn main() {
     let app = Router::new()
         .route("/report", post(report_status))
         .route("/get", post(get_task))
-        .with_state(app_state.clone());
+        .with_state(Arc::clone(&app_state));
 
-    BOT_STATE.set(app_state.clone()).unwrap();
+    if let Err(_e) = BOT_STATE.set(Arc::clone(&app_state)) {
+        tracing::error!("Error setting BOT_STATE");
+        exit(1);
+    }
 
     let address = SocketAddr::from(([127, 0, 0, 1], config.port));
 
     let listener = TcpListener::bind(&address)
         .await
-        .expect("Error creating Tcp listener");
+        .unwrap_or_else(|e| {
+            tracing::error!("Error binding to {}: {}", address, e);
+            exit(1);
+        });
 
     tokio::spawn(async move {
-        bot::setup(bot_clone).await;
+        bot::setup(bot_clone).await.unwrap_or_else(|e| {
+            tracing::error!("Error setting up bot: {}", e);
+            exit(1);
+        });
     });
 
-    println!("Staring server...");
-
-    axum::serve(listener, app).await.unwrap();
+    if let Err(e) = axum::serve(listener, app).await {
+        tracing::error!("Error serving: {}", e);
+        exit(1);
+    }
 }
 
-fn get_task_type(app_state: &Arc<AppState>, task_id: &str) -> TaskType {
-    let all_tasks = app_state.all_tasks.read().unwrap();
+fn get_task_type(app_state: &Arc<AppState>, task_id: &str) -> Result<TaskType,AppError> {
+    let all_tasks = app_state.all_tasks.read()?;
 
-    let task_type = all_tasks.get(task_id).unwrap();
+    let task_type = all_tasks.get(task_id).ok_or(AppError::TaskNotFound(task_id.to_owned()))?;
 
-    task_type.clone()
+    Ok(task_type.clone())
 }
 
 // Method: POST
@@ -123,25 +136,25 @@ fn get_task_type(app_state: &Arc<AppState>, task_id: &str) -> TaskType {
 async fn report_status(
     app_state: State<Arc<AppState>>,
     Json(req): Json<TaskStatus>,
-) -> Result<StatusCode, ()> {
+) -> Result<StatusCode, AppError> {
     tracing::info!("Report status");
 
-    let task_type = get_task_type(&app_state, &req.task);
+    let task_type = get_task_type(&app_state, &req.task)?;
 
-    let msg = format!("Task {} finished. Status: {}", task_type, req.status);
+    let notify_msg = format!("Task {} finished. Status: {}", task_type, req.status);
 
     app_state
         .bot
-        .send_message(ChatId(app_state.tg_user_id), msg)
+        .send_message(ChatId(app_state.tg_user_id), notify_msg)
         .send()
-        .await
-        .unwrap();
+        .await?;
 
     // handle and send payload
     match task_type {
         TaskType::CaptureImage | TaskType::CaptureImageNow => {
             let payload = req.payload;
             // convert base64 image to bytes
+            #[allow(clippy::unwrap_used)]
             let payload = BASE64_STANDARD.decode(payload.as_bytes()).unwrap();
 
             let photo = InputFile::memory(payload);
@@ -150,8 +163,7 @@ async fn report_status(
                 .bot
                 .send_photo(ChatId(app_state.tg_user_id), photo)
                 .send()
-                .await
-                .unwrap();
+                .await?;
         }
         TaskType::HeartBeat => {
             let payload = req.payload;
@@ -160,21 +172,19 @@ async fn report_status(
                 app_state
                     .bot
                     .send_message(ChatId(app_state.tg_user_id), "No task is running.")
-                    .await
-                    .unwrap();
+                    .await?;
                 return Ok(StatusCode::OK);
             }
 
-            let task_type = get_task_type(&app_state, &payload);
+            let response_task_type = get_task_type(&app_state, &payload)?;
 
-            let msg = format!("Task {task_type} is running.\nTask id: {payload}");
+            let msg = format!("Task {response_task_type} is running.\nTask id: {payload}");
 
             app_state
                 .bot
                 .send_message(ChatId(app_state.tg_user_id), msg)
                 .send()
-                .await
-                .unwrap();
+                .await?;
 
             return Ok(StatusCode::OK);
         }
@@ -193,16 +203,17 @@ async fn report_status(
 
 // Method: POST
 // Content-Type: application/json
+#[debug_handler]
 async fn get_task(
     app_state: State<Arc<AppState>>,
     Json(req): Json<GetTaskReq>,
-) -> Result<Json<GetTaskResponse>, ()> {
-    let mut devices = app_state.devices.write().unwrap();
+) -> Result<Json<GetTaskResponse>, AppError> {
+    let mut devices = app_state.devices.write()?;
 
     if !devices.contains_key(&req.device) {
-        if let Some(allowed_devices) = &app_state.allowed_devices {
+        if let Some(ref allowed_devices) = app_state.allowed_devices {
             if allowed_devices.contains_key(&req.device) {
-                let device_name = allowed_devices.get(&req.device).unwrap();
+                let device_name = allowed_devices.get(&req.device).ok_or(AppError::DeviceNotFound(req.device.clone()))?;
                 tracing::info!("New allowed device: {} ({})", req.device, device_name);
                 devices.insert(
                     req.device.clone(),
@@ -218,7 +229,7 @@ async fn get_task(
     }
 
     let device_length = devices.len();
-    let device = devices.get_mut(&req.device).unwrap();
+    let device = devices.get_mut(&req.device).ok_or(AppError::DeviceNotFound(req.device))?;
     let users = &mut device.users;
     let user = users.entry(req.user.clone()).or_insert(User {
         id: req.user.clone(),
@@ -229,11 +240,11 @@ async fn get_task(
     if device_length == 1 && users.len() == 1 {
         app_state
             .is_single_user
-            .store(true, std::sync::atomic::Ordering::Release);
+            .store(true, Ordering::Release);
     } else {
         app_state
             .is_single_user
-            .store(false, std::sync::atomic::Ordering::Release);
+            .store(false, Ordering::Release);
     }
 
     Ok(Json(GetTaskResponse { tasks }))

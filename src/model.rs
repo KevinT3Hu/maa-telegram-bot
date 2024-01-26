@@ -23,8 +23,8 @@ pub struct Device {
 impl Device {
     pub fn new(id: &str) -> Self {
         Self {
-            id: id.to_string(),
-            name: id.to_string(),
+            id: id.to_owned(),
+            name: id.to_owned(),
             users: HashMap::new(),
         }
     }
@@ -86,9 +86,10 @@ pub enum TaskType {
     HeartBeat,
 }
 
+#[allow(clippy::absolute_paths)]
 impl Display for TaskType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
+        match *self {
             TaskType::CaptureImage => write!(f, "CaptureImage"),
             TaskType::CaptureImageNow => write!(f, "CaptureImageNow"),
             TaskType::LinkStartBase => write!(f, "LinkStart-Base"),
@@ -122,6 +123,8 @@ impl TaskType {
 }
 
 impl From<&str> for TaskType {
+
+    #[allow(clippy::panic)]
     fn from(s: &str) -> Self {
         match s {
             "CaptureImage" => Self::CaptureImage,

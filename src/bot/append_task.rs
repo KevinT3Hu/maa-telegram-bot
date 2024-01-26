@@ -14,8 +14,8 @@ use super::{
 
 pub async fn start_append_task_dialog(bot: Bot, dialog: BotDialog) -> HandlerResult {
     // If only one user is present, no need to ask for device and user
-    if get_is_single_user() {
-        let (device, user) = get_single_device_and_user();
+    if get_is_single_user()? {
+        let (device, user) = get_single_device_and_user()?;
         dialog
             .update(DialogState::AppendTaskToUser {
                 device_id: device.id.clone(),
@@ -35,10 +35,10 @@ pub async fn start_append_task_dialog(bot: Bot, dialog: BotDialog) -> HandlerRes
 
     dialog.update(DialogState::StartAppendTask).await?;
 
-    let sent_msg = "Select device:".to_string();
+    let sent_msg = "Select device:".to_owned();
 
     bot.send_message(dialog.chat_id(), sent_msg)
-        .reply_markup(get_devices_markup())
+        .reply_markup(get_devices_markup()?)
         .await?;
 
     Ok(())
@@ -56,6 +56,7 @@ pub async fn receive_device(bot: Bot, dialog: BotDialog, q: CallbackQuery) -> Ha
 
         let device_id = device_id.replace("d:", "");
 
+        #[allow(clippy::unwrap_used)]
         let current_state = dialog.get().await?.unwrap();
 
         let next_state = match current_state {
@@ -67,7 +68,7 @@ pub async fn receive_device(bot: Bot, dialog: BotDialog, q: CallbackQuery) -> Ha
                     device_id: device_id.clone(),
                 }
             }
-            _ => {
+            DialogState::Idle | DialogState::AppendTaskToDevice{ .. } | DialogState::AppendTaskToUser{ .. } | DialogState::AppendHeartBeatTaskToDevice{ .. } => {
                 bot.send_message(dialog.chat_id(), "Invalid state")
                     .send()
                     .await?;
@@ -81,7 +82,7 @@ pub async fn receive_device(bot: Bot, dialog: BotDialog, q: CallbackQuery) -> Ha
         bot.answer_callback_query(q.id).show_alert(false).await?;
 
         bot.send_message(dialog.chat_id(), "Select user")
-            .reply_markup(get_users_markup(&device_id))
+            .reply_markup(get_users_markup(&device_id)?)
             .await?;
     }
 
@@ -105,12 +106,13 @@ pub async fn receive_user(
 
         let user_id = user_id.replace("u:", "");
 
+        #[allow(clippy::unwrap_used)]
         let current_state = dialog.get().await?.unwrap();
 
-        if let DialogState::AppendHeartBeatTaskToDevice { device_id } = current_state {
+        if let DialogState::AppendHeartBeatTaskToDevice { .. } = current_state {
             dialog.exit().await?;
 
-            append_task(&device_id, &user_id, &TaskType::HeartBeat.to_string());
+            append_task(&device_id, &user_id, &TaskType::HeartBeat.to_string())?;
 
             bot.answer_callback_query(q.id).show_alert(true).await?;
             return Ok(());
@@ -152,7 +154,7 @@ pub async fn receive_task(
 
         dialog.exit().await?;
 
-        append_task(&device_id, &user_id, &task);
+        append_task(&device_id, &user_id, &task)?;
 
         bot.answer_callback_query(q.id).show_alert(true).await?;
 

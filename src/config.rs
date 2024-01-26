@@ -1,3 +1,5 @@
+use std::fs::read_to_string;
+
 use serde::Deserialize;
 
 #[derive(clap::Parser)]
@@ -21,8 +23,10 @@ pub struct DeviceInfo {
 }
 
 impl Config {
+
+    #[allow(clippy::expect_used)]
     pub fn new(file: &str) -> Self {
-        let config_file = std::fs::read_to_string(file).expect("Unable to read config file");
+        let config_file = read_to_string(file).expect("Unable to read config file");
 
         serde_json::from_str(&config_file).expect("Unable to parse config file")
     }
